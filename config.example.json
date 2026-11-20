@@ -1,0 +1,22 @@
+{
+  "proxy": {
+    "host": "127.0.0.1",
+    "port": 7897,
+    "enabled": true,
+    "bypass": [
+      "localhost",
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  "apps": [
+    {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "exe": "%LOCALAPPDATA%\\Programs\\antigravity\\Antigravity.exe",
+      "args": "",
+      "kind": "auto",
+      "note": "Google AI IDE (Electron + Node sidecar)"
+    }
+  ]
+}

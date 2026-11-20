@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="pd-token" content="__PROXY_DESK_TOKEN__">
+<link rel="icon" type="image/png" sizes="256x256" href="/icon.png">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="shortcut icon" href="/favicon.ico">
+<title>ProxyDesk · 进程级代理应用台</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --surface:#ffffff; --line:#e6eaf2; --text:#1b2436;
+    --muted:#7b879c; --primary:#3b6cf6; --primary-soft:#eaf0ff;
+    --green:#16a34a; --red:#e5484d; --amber:#d97706;
+    --shadow:0 1px 2px rgba(20,30,60,.04), 0 8px 24px rgba(20,30,60,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+  button,input,select,textarea{font-family:inherit}
+  header{display:flex;align-items:center;gap:24px;padding:18px 30px;
+    background:var(--surface);border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:13px;flex:1}
+  .logo{width:44px;height:44px;flex:none;display:block;
+    filter:drop-shadow(0 4px 10px rgba(75,121,247,.26))}
+  .logo img{width:100%;height:100%;display:block}
+  h1{margin:0;font-size:17px;letter-spacing:.2px}
+  .brand p{margin:1px 0 0;color:var(--muted);font-size:12px}
+  .proxy-pill{display:flex;align-items:center;gap:9px;padding:8px 14px;border-radius:999px;
+    background:#f7f9fd;border:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+  .dot{width:9px;height:9px;border-radius:50%;background:#cbd3e1;flex:none}
+  .dot.on{background:var(--green);box-shadow:0 0 0 4px rgba(22,163,74,.13);animation:pulse 2.4s infinite}
+  .dot.off{background:var(--red);box-shadow:0 0 0 4px rgba(229,72,77,.12)}
+  @keyframes pulse{50%{box-shadow:0 0 0 7px rgba(22,163,74,0)}}
+  .switch{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer}
+  .switch input{accent-color:var(--primary);width:16px;height:16px;cursor:pointer}
+  main{max-width:1120px;margin:0 auto;padding:26px 30px 40px}
+  .toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:20px}
+  h2{margin:0;font-size:18px}
+  .hint{margin:4px 0 0;color:var(--muted);font-size:12.5px}
+  .actions{display:flex;gap:9px;flex:none}
+  .btn{border:1px solid var(--line);background:var(--surface);color:var(--text);
+    padding:9px 15px;border-radius:9px;cursor:pointer;font-size:13px;transition:.15s}
+  .btn:hover{border-color:#c8d3ea;background:#fafbff}
+  .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  .btn.primary:hover{background:#2f5ee6}
+  .btn.tiny{padding:6px 10px;font-size:12px}
+  .btn.danger{color:var(--red)}
+  .btn.danger:hover{background:#fff2f2;border-color:#f3c6c8}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:15px;
+    padding:17px;box-shadow:var(--shadow);transition:.18s}
+  .card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(20,30,60,.1)}
+  .card-top{display:flex;align-items:flex-start;justify-content:space-between}
+  .avatar{position:relative;width:42px;height:42px;border-radius:12px;display:grid;place-items:center;
+    color:#fff;font-weight:700;font-size:17px;overflow:hidden;flex:none}
+  .avatar.has-icon{background:#f5f7fc!important;border:1px solid var(--line)}
+  .avatar-img{position:absolute;inset:5px;width:calc(100% - 10px);height:calc(100% - 10px);
+    object-fit:contain;opacity:0;transition:opacity .15s}
+  .avatar.has-icon .avatar-img{opacity:1}
+  .avatar.has-icon .avatar-letter{opacity:0}
+  .badge{font-size:11px;padding:3px 9px;border-radius:999px;background:#f1f4fa;color:var(--muted)}
+  .badge.electron{background:var(--primary-soft);color:#3159c9}
+  .card-name{margin:12px 0 2px;font-weight:600;font-size:15px}
+  .card-path{color:var(--muted);font-size:11.5px;word-break:break-all;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card-note{margin-top:4px;color:var(--muted);font-size:12px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card-meta{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px;font-size:11.5px}
+  .ok{color:var(--green)} .bad{color:var(--red)} .warn{color:var(--amber)}
+  .card-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px}
+  .card-actions .btn.primary{flex:1;min-width:70px}
+  .empty{grid-column:1/-1;text-align:center;padding:46px 20px;color:var(--muted);
+    background:var(--surface);border:1px dashed var(--line);border-radius:15px}
+  .log-panel{margin-top:26px;background:var(--surface);border:1px solid var(--line);
+    border-radius:15px;box-shadow:var(--shadow);overflow:hidden}
+  .log-head{display:flex;align-items:center;justify-content:space-between;
+    padding:13px 18px;border-bottom:1px solid var(--line)}
+  .log-head h3{margin:0;font-size:13px}
+  .log-list{padding:8px 18px 14px;max-height:190px;overflow:auto;
+    font:12px/1.7 ui-monospace,Consolas,"Cascadia Code",monospace}
+  .log-row{display:flex;gap:12px;padding:3px 0;border-bottom:1px dashed #f0f2f7}
+  .log-row:last-child{border-bottom:0}
+  .log-time{color:#a3adbf;flex:none}
+  .log-row.info .log-msg{color:var(--text)} .log-row.ok .log-msg{color:var(--green)}
+  .log-row.err .log-msg{color:var(--red)} .log-row.dim .log-msg{color:var(--muted)}
+  .modal-mask{position:fixed;inset:0;background:rgba(18,26,45,.36);
+    display:grid;place-items:center;z-index:20;backdrop-filter:blur(2px)}
+  .modal-mask[hidden]{display:none}
+  .modal{width:min(520px,92vw);max-height:88vh;overflow:auto;background:var(--surface);
+    border-radius:17px;padding:24px;box-shadow:0 24px 70px rgba(15,25,50,.25)}
+  .modal h3{margin:0 0 18px;font-size:16px}
+  .modal label{display:block;margin-bottom:13px;font-size:12.5px;color:var(--muted)}
+  .modal input,.modal select,.modal textarea{display:block;width:100%;margin-top:5px;
+    padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:#fbfcff;
+    color:var(--text);font-size:13px;outline:none}
+  .modal input:focus,.modal select:focus,.modal textarea:focus{border-color:var(--primary)}
+  .modal textarea{resize:vertical;min-height:66px}
+  .input-row{display:flex;gap:8px;margin-top:5px}
+  .input-row input{margin-top:0;flex:1}
+  .input-row .btn{flex:none;white-space:nowrap}
+  .inspect{margin:-4px 0 14px;padding:9px 11px;border-radius:9px;font-size:12px;
+    background:#f7f9fd;border:1px solid var(--line);color:var(--muted)}
+  .inspect.good{background:#f0fbf4;border-color:#cdeed9;color:#187a41}
+  .inspect.bad{background:#fff4f4;border-color:#f6d3d5;color:#b03035}
+  .modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
+  .foot{margin-top:22px;text-align:center;color:#a3adbf;font-size:11.5px}
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);
+    background:#1b2436;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;
+    box-shadow:0 10px 30px rgba(0,0,0,.2);z-index:30;opacity:0;transition:.25s;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo"><img src="/icon.svg" alt="ProxyDesk"></div>
+    <div><h1>ProxyDesk</h1><p>进程级代理应用台 · 不碰 TUN / 系统代理</p></div>
+  </div>
+  <div class="proxy-pill">
+    <span class="dot" id="proxyDot"></span>
+    <span id="proxyText">检测中…</span>
+  </div>
+  <label class="switch"><input type="checkbox" id="proxyEnabled"><span>启用代理注入</span></label>
+</header>
+
+<main>
+  <div class="toolbar">
+    <div>
+      <h2>我的应用</h2>
+      <p class="hint">只有从这里启动的应用才带代理环境；从桌面快捷方式启动不会。</p>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="btnAdd">+ 添加应用</button>
+      <button class="btn" id="btnSettings">代理设置</button>
+    </div>
+  </div>
+
+  <div class="grid" id="appGrid"></div>
+
+  <section class="log-panel">
+    <div class="log-head"><h3>运行日志</h3><button class="btn tiny" id="btnClearLog">清空</button></div>
+    <div class="log-list" id="logList"></div>
+  </section>
+
+  <div class="foot">子进程环境变量由 Python 后端注入 · 关闭窗口即结束服务 · 配置存于 config.json</div>
+</main>
+
+<div class="modal-mask" id="editor" hidden>
+  <div class="modal">
+    <h3 id="editorTitle">添加应用</h3>
+    <label>应用名称<input id="fName" placeholder="Antigravity"></label>
+    <label>可执行文件完整路径
+      <div class="input-row">
+        <input id="fExe" placeholder="%LOCALAPPDATA%\Programs\...\App.exe">
+        <button type="button" class="btn" id="btnPickExe">浏览…</button>
+      </div>
+    </label>
+    <div class="inspect" id="inspectBox">输入路径后自动识别网络栈类型</div>
+    <label>启动参数（可选）<input id="fArgs" placeholder="--some-flag --foo=bar"></label>
+    <label>网络栈类型
+      <select id="fKind">
+        <option value="auto">自动识别（推荐）</option>
+        <option value="electron">Electron / Chromium（env + 启动参数）</option>
+        <option value="generic">普通应用（仅环境变量）</option>
+      </select>
+    </label>
+    <label>备注<input id="fNote" placeholder="可选"></label>
+    <div class="modal-actions">
+      <button class="btn" id="btnCancel">取消</button>
+      <button class="btn primary" id="btnSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="settings" hidden>
+  <div class="modal">
+    <h3>代理设置</h3>
+    <label>代理主机<input id="sHost" placeholder="127.0.0.1"></label>
+    <label>代理端口<input id="sPort" type="number" placeholder="7897"></label>
+    <label>直连例外（逗号或换行分隔，Chromium 侧自动转分号）
+      <textarea id="sBypass" placeholder="localhost,127.0.0.1,::1"></textarea>
+    </label>
+    <div class="inspect" id="settingsHint"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnSettingsCancel">取消</button>
+      <button class="btn primary" id="btnSettingsSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const TOKEN = document.querySelector('meta[name="pd-token"]')?.content || '';
+let STATE = null;
+let EDIT_ID = null;
+let LOGS = [];
+let inspectTimer = null;
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+function pad(n){ return String(n).padStart(2,'0'); }
+function now(){ const d=new Date(); return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); }
+function toast(msg){
+  const el=$('#toast'); el.textContent=msg; el.classList.add('show');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),2400);
+}
+function logBatch(items){
+  const t=now();
+  const rows=items.map(it=>({t, msg:it.msg, type:it.type||'info'}));
+  LOGS=rows.concat(LOGS).slice(0,80);
+  renderLogs();
+}
+function log(msg,type='info'){
+  logBatch([{msg,type}]);
+}
+function renderLogs(){
+  $('#logList').innerHTML = LOGS.length
+    ? LOGS.map(l=>`<div class="log-row ${l.type}"><span class="log-time">${l.t}</span><span class="log-msg">${esc(l.msg)}</span></div>`).join('')
+    : '<div class="log-row dim"><span class="log-time">--:--:--</span><span class="log-msg">暂无日志</span></div>';
+}
+async function api(path,body){
+  const headers={'X-ProxyDesk-Token':TOKEN};
+  const opt = body===undefined ? {headers} : {
+    method:'POST',
+    headers:{...headers,'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  };
+  const r = await fetch(path,opt);
+  return r.json();
+}
+function colorOf(name){
+  const palette=['#4b79f7','#7b5cf5','#0ea5a5','#e2803c','#d9538a','#3f8f5b','#5a6acf'];
+  let h=0; for(const ch of String(name)) h=(h*31+ch.charCodeAt(0))>>>0;
+  return palette[h%palette.length];
+}
+function initial(name){
+  const s=String(name||'?').trim(); return s ? (s[0].toUpperCase()) : '?';
+}
+function render(){
+  if(!STATE) return;
+  const p=STATE.proxy;
+  $('#proxyDot').className = 'dot ' + (p.enabled ? (STATE.proxy_online?'on':'off') : '');
+  $('#proxyText').textContent = !p.enabled ? '代理注入已关闭'
+    : (STATE.proxy_online ? `${STATE.proxy_url} · ${STATE.proxy_latency_ms}ms` : '代理未监听 · 请启动 Clash Verge');
+  $('#proxyEnabled').checked = !!p.enabled;
+  const grid=$('#appGrid');
+  if(!STATE.apps.length){
+    grid.innerHTML='<div class="empty">还没有应用，点右上角「添加应用」把 exe 加进来</div>';
+    return;
+  }
+  grid.innerHTML = STATE.apps.map(a=>{
+    const kind=a.effective_kind;
+    const tag = kind==='electron' ? '<span class="badge electron">Electron / Chromium</span>'
+                                   : '<span class="badge">通用</span>';
+    const iconImg = a.exists
+      ? `<img class="avatar-img" src="/api/app/icon?id=${encodeURIComponent(a.id)}&v=${encodeURIComponent(a.resolved_exe)}&token=${encodeURIComponent(TOKEN)}" alt="" onload="this.parentElement.classList.add('has-icon')" onerror="this.remove()">`
+      : '';
+    return `<div class="card" data-id="${esc(a.id)}">
+      <div class="card-top">
+        <div class="avatar" style="background:${colorOf(a.name)}">${iconImg}<span class="avatar-letter">${esc(initial(a.name))}</span></div>
+        ${tag}
+      </div>
+      <div class="card-name">${esc(a.name)}</div>
+      <div class="card-path" title="${esc(a.exe)}">${esc(a.exe)}</div>
+      ${a.note ? `<div class="card-note" title="${esc(a.note)}">${esc(a.note)}</div>` : ''}
+      <div class="card-meta">
+        <span class="${a.exists?'ok':'bad'}">${a.exists?'文件存在':'路径无效'}</span>
+        ${a.running?'<span class="warn">● 运行中</span>':''}
+        ${a.kind==='auto'&&a.detected_kind==='electron'?`<span class="ok">自动识别 ${a.evidence.length} 项特征</span>`:''}
+      </div>
+      <div class="card-actions">
+        <button class="btn primary" data-act="launch">启动</button>
+        <button class="btn tiny" data-act="preview">预览注入</button>
+        <button class="btn tiny" data-act="edit">编辑</button>
+        <button class="btn tiny danger" data-act="del">删除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function refresh(){
+  try{
+    const res = await api('/api/state');
+    if(!res || res.error){
+      log('获取状态失败: '+(res && res.error ? res.error : '未知错误'),'err');
+      return;
+    }
+    STATE = res;
+    render();
+  }catch(e){ log('后端连接失败: '+e,'err'); }
+}
+function openEditor(app){
+  EDIT_ID = app ? app.id : null;
+  $('#editorTitle').textContent = app ? '编辑应用' : '添加应用';
+  $('#fName').value = app ? app.name : '';
+  $('#fExe').value = app ? app.exe : '';
+  $('#fArgs').value = app ? (app.args||'') : '';
+  $('#fKind').value = app ? (app.kind||'auto') : 'auto';
+  $('#fNote').value = app ? (app.note||'') : '';
+  $('#inspectBox').className='inspect';
+  $('#inspectBox').textContent='输入路径后自动识别网络栈类型';
+  $('#editor').hidden=false;
+  if(app) inspect();
+}
+function closeEditor(){ $('#editor').hidden=true; EDIT_ID=null; }
+async function inspect(){
+  const val=$('#fExe').value.trim();
+  const box=$('#inspectBox');
+  if(!val){ box.className='inspect'; box.textContent='输入路径后自动识别网络栈类型'; return; }
+  try{
+    const r=await api('/api/inspect?path='+encodeURIComponent(val));
+    if(!r.exists){
+      box.className='inspect bad'; box.textContent='路径无效或文件不存在：'+r.path; return;
+    }
+    box.className='inspect good';
+    box.textContent = r.kind==='electron'
+      ? `识别为 Electron / Chromium（${r.evidence.length} 项特征）→ 环境变量 + --proxy-server 双注入`
+      : `识别为普通应用 → 仅注入环境变量（如需走 Chromium 参数请手动改类型）`;
+  }catch(e){ box.className='inspect bad'; box.textContent='识别失败: '+e; }
+}
+async function saveEditor(){
+  const body={
+    id:EDIT_ID, name:$('#fName').value.trim(), exe:$('#fExe').value.trim(),
+    args:$('#fArgs').value.trim(), kind:$('#fKind').value, note:$('#fNote').value.trim()
+  };
+  const label=EDIT_ID?'已更新':'已添加';
+  const r=await api(EDIT_ID?'/api/app/update':'/api/app/add',body);
+  if(!r.ok){ toast(r.error||'保存失败'); log('保存失败: '+(r.error||''),'err'); return; }
+  STATE=r.state; render(); closeEditor();
+  log(`${label}应用：${body.name}`,'ok'); toast('已保存');
+}
+async function doLaunch(id,force=false){
+  const r=await api('/api/launch',{id,force});
+  if(r.code==='already_running'){
+    if(confirm(r.error+'\n\n仍要尝试启动吗？（环境变量不会进入旧进程）')) return doLaunch(id,true);
+    return;
+  }
+  if(r.ok){
+    const envCount = r.env ? Object.keys(r.env).length : 0;
+    const injectDesc = !envCount
+      ? '（无，代理注入已关闭）'
+      : (r.injected && r.injected.length ? 'env + '+r.injected.join(', ') : 'env only');
+    const lines = [{msg:`启动 ${r.app} [${r.kind}] · 注入 ${injectDesc}`, type:'ok'}];
+    if(r.cmd) lines.push({msg:'  ' + r.cmd.join(' '), type:'dim'});
+    logBatch(lines);
+    toast(r.message||'已启动');
+    refresh();
+    setTimeout(refresh, 700);
+  }else{
+    log(r.error||'启动失败','err'); toast(r.error||'启动失败');
+    refresh();
+  }
+}
+async function preview(id){
+  const r=await api('/api/launch',{id,dry_run:true});
+  if(!r.ok){ log('预览失败: '+(r.error||''),'err'); toast(r.error||'预览失败'); return; }
+  const envEntries = r.env ? Object.entries(r.env) : [];
+  const envText = envEntries.length
+    ? envEntries.map(([k,v])=>k+'='+v).join(' | ')
+    : '（无，代理注入已关闭）';
+  const flagText = r.injected && r.injected.length
+    ? r.injected.join(', ')
+    : (r.kind==='electron' ? '（无，代理注入已关闭或已手动指定）' : '（无，普通应用只吃 env）');
+  const lines = [
+    {msg:`预览 ${r.app} [${r.kind}]（未启动，代理 ${r.proxy_latency_ms}ms）`, type:'info'},
+    {msg:'  CMD : '+r.cmd.join(' '), type:'dim'},
+    {msg:'  ENV : '+envText, type:'dim'},
+    {msg:'  FLAG: '+flagText, type:'dim'}
+  ];
+  if(r.already_running){
+    if(r.kind==='electron'){
+      lines.push({msg:'  注意：该应用当前已在运行，单实例锁会让环境变量不生效', type:'err'});
+    }else{
+      lines.push({msg:'  提示：该应用已有实例在运行（普通应用通常支持独立多开）', type:'dim'});
+    }
+  }
+  logBatch(lines);
+  toast('已把注入明细写到日志');
+}
+async function removeApp(id){
+  const a=STATE.apps.find(x=>x.id===id);
+  if(!confirm(`确定从应用台移除「${a?a.name:id}」？\n（只删配置，不会卸载程序）`)) return;
+  const r=await api('/api/app/delete',{id});
+  if(!r.ok){ toast(r.error||'移除失败'); log('移除失败: '+(r.error||''),'err'); return; }
+  STATE=r.state; render(); log('已移除应用：'+(a?a.name:id),'info');
+}
+function openSettings(){
+  const p=STATE.proxy;
+  $('#sHost').value=p.host; $('#sPort').value=p.port;
+  $('#sBypass').value=(p.bypass||[]).join(', ');
+  $('#settingsHint').className='inspect';
+  $('#settingsHint').textContent=`当前代理 ${STATE.proxy_url} · ${STATE.proxy_online?'在线':'离线'}`;
+  $('#settings').hidden=false;
+}
+async function saveSettings(){
+  const rawPort=$('#sPort').value.trim();
+  const body={proxy:{
+    host:$('#sHost').value.trim(),
+    port:rawPort === '' ? '' : Number(rawPort),
+    bypass:$('#sBypass').value,
+    enabled:STATE.proxy.enabled
+  }};
+  try{
+    const r=await api('/api/settings',body);
+    if(!r.ok){
+      toast(r.error||'保存设置失败');
+      log('保存代理设置失败: '+(r.error||''),'err');
+      return;
+    }
+    STATE=r.state; render(); $('#settings').hidden=true;
+    log(`代理设置已更新：${STATE.proxy_url}`,'ok'); toast('已保存');
+  }catch(e){
+    toast('保存设置失败');
+    log('保存代理设置失败: '+e,'err');
+  }
+}
+
+$('#appGrid').addEventListener('click',e=>{
+  const btn=e.target.closest('button[data-act]'); if(!btn) return;
+  const id=btn.closest('.card').dataset.id;
+  const act=btn.dataset.act;
+  if(act==='launch') doLaunch(id);
+  else if(act==='preview') preview(id);
+  else if(act==='edit') openEditor(STATE.apps.find(x=>x.id===id));
+  else if(act==='del') removeApp(id);
+});
+$('#btnAdd').onclick=()=>openEditor(null);
+$('#btnCancel').onclick=closeEditor;
+$('#btnSave').onclick=saveEditor;
+$('#editor').onclick=e=>{ if(e.target.id==='editor') closeEditor(); };
+$('#fExe').addEventListener('input',()=>{ clearTimeout(inspectTimer); inspectTimer=setTimeout(inspect,350); });
+$('#btnPickExe').onclick=async ()=>{
+  const btn=$('#btnPickExe');
+  btn.disabled=true;
+  try{
+    const r=await api('/api/pick-exe',{initial:$('#fExe').value.trim()});
+    if(!r.ok){
+      toast(r.error||'无法打开文件选择器');
+      if(!r.busy) log(r.error||'文件选择失败','err');
+      return;
+    }
+    if(r.path){
+      $('#fExe').value=r.path;
+      if(!$('#fName').value.trim()){
+        const base=r.path.split(/[\\/]/).pop()||'';
+        $('#fName').value=base.replace(/\.[^.]+$/,'');
+      }
+      inspect();
+    }
+  }catch(e){
+    toast('打开文件选择器失败');
+    log('打开文件选择器失败: '+e,'err');
+  }finally{
+    btn.disabled=false;
+  }
+};
+$('#btnSettings').onclick=openSettings;
+$('#btnSettingsCancel').onclick=()=>$('#settings').hidden=true;
+$('#btnSettingsSave').onclick=saveSettings;
+$('#settings').onclick=e=>{ if(e.target.id==='settings') $('#settings').hidden=true; };
+$('#btnClearLog').onclick=()=>{ LOGS=[]; renderLogs(); };
+$('#proxyEnabled').onchange=async e=>{
+  const enabled=e.target.checked;
+  try{
+    const r=await api('/api/settings',{proxy:{enabled}});
+    if(!r.ok){
+      e.target.checked=!enabled;
+      toast(r.error||'切换失败');
+      log('切换代理注入失败: '+(r.error||''),'err');
+      return;
+    }
+    STATE=r.state; render();
+    log('代理注入已'+(enabled?'开启':'关闭'),'info');
+  }catch(err){
+    e.target.checked=!enabled;
+    toast('切换失败');
+    log('切换代理注入失败: '+err,'err');
+  }
+};
+window.addEventListener('beforeunload',()=>{
+  try{ navigator.sendBeacon('/api/quit?token='+encodeURIComponent(TOKEN),''); }catch(e){}
+});
+renderLogs();
+log('ProxyDesk 已就绪','ok');
+refresh();
+setInterval(refresh,8000);
+</script>
+</body>
+</html>

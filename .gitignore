@@ -1,0 +1,18 @@
+# Local user configuration (auto-generated on first run or copied from config.example.json)
+config.json
+config.json.tmp
+
+# Runtime logs and shortcuts
+desk_error.log
+*.lnk
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
