@@ -9,12 +9,14 @@ Layers:
   Node / generic apps  -> HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY
   Electron / Chromium -> --proxy-server, --proxy-bypass-list (they ignore
                          *_PROXY env vars on Windows)
+  Firefox / Gecko     -> isolated -no-remote -profile + user.js prefs
 """
 from __future__ import annotations
 
 import ctypes
 import json
 import os
+import re
 import secrets
 import socket
 import struct
@@ -36,6 +38,7 @@ HTML_PATH = ROOT / "index.html"
 ICO_PATH = ROOT / "proxydesk.ico"
 PNG_PATH = ROOT / "proxydesk.png"
 SVG_PATH = ROOT / "proxydesk.svg"
+PROFILES_DIR = ROOT / "profiles"
 RUNTIME_PATH = Path(tempfile.gettempdir()) / "proxy_desk_runtime.json"
 
 API_TOKEN = secrets.token_urlsafe(24)
@@ -71,6 +74,28 @@ ELECTRON_MARKERS = [
     "chrome.dll",
     "LICENSES.chromium.html",
 ]
+
+# Files that only exist next to a Firefox / Gecko based binary.
+FIREFOX_MARKERS = [
+    "xul.dll",
+    "omni.ja",
+    "mozglue.dll",
+    "nss3.dll",
+    "lgpllibs.dll",
+    "application.ini",
+    "platform.ini",
+    "softokn3.dll",
+]
+
+FIREFOX_STEMS = {
+    "firefox",
+    "librewolf",
+    "waterfox",
+    "floorp",
+    "zen",
+    "thunderbird",
+    "seamonkey",
+}
 
 BROWSERS = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -141,19 +166,26 @@ def probe_proxy(host, port, timeout=0.35):
 
 
 def detect_kind(exe: str):
-    """Return ('electron' | 'generic', evidence list)."""
+    """Return ('electron' | 'firefox' | 'generic', evidence list)."""
     folder = Path(exe).parent
-    found = [m for m in ELECTRON_MARKERS if (folder / m).exists()]
+    elec_found = [m for m in ELECTRON_MARKERS if (folder / m).exists()]
     stem = Path(exe).stem.lower()
     if stem in ("chrome", "msedge", "chromium", "brave", "vivaldi"):
-        return "electron", ["browser binary"] + found
-    if len(found) >= 2:
-        return "electron", found
-    return "generic", found
+        return "electron", ["browser binary"] + elec_found
+    if len(elec_found) >= 2:
+        return "electron", elec_found
+
+    ff_found = [m for m in FIREFOX_MARKERS if (folder / m).exists()]
+    if stem in FIREFOX_STEMS:
+        return "firefox", ["gecko binary"] + ff_found
+    if len(ff_found) >= 2 and ("xul.dll" in ff_found or "omni.ja" in ff_found):
+        return "firefox", ff_found
+
+    return "generic", elec_found
 
 
 def effective_kind(app):
-    if app.get("kind") in ("electron", "generic"):
+    if app.get("kind") in ("electron", "firefox", "generic"):
         return app["kind"]
     return detect_kind(expand(app["exe"]))[0]
 
@@ -162,6 +194,12 @@ TH32CS_SNAPPROCESS = 0x00000002
 INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 ERROR_ACCESS_DENIED = 5
+GENERIC_READ = 0x80000000
+GENERIC_WRITE = 0x40000000
+OPEN_EXISTING = 3
+FILE_ATTRIBUTE_NORMAL = 0x00000080
+ERROR_SHARING_VIOLATION = 32
+ERROR_LOCK_VIOLATION = 33
 
 
 class PROCESSENTRY32W(ctypes.Structure):
@@ -198,6 +236,16 @@ if os.name == "nt":
         ctypes.POINTER(wintypes.DWORD),
     ]
     _kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    _kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    _kernel32.CreateFileW.restype = wintypes.HANDLE
 else:
     _kernel32 = None
 
@@ -351,6 +399,93 @@ def build_env(cfg):
 CHROMIUM_LOOPBACK = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
+def firefox_profile_dir(app) -> Path:
+    raw = str(app.get("id") or app.get("name") or "firefox")
+    safe_id = re.sub(r"[^a-zA-Z0-9._-]", "_", raw).strip("._") or "firefox"
+    return PROFILES_DIR / safe_id
+
+
+def _has_firefox_profile_arg(tokens: list[str]) -> bool:
+    for tok in tokens:
+        low = tok.lower()
+        if low in ("-profile", "--profile", "-p") or low.startswith("--profile="):
+            return True
+    return False
+
+
+def is_firefox_profile_locked(profile_dir: Path) -> bool:
+    lock_file = profile_dir / "parent.lock"
+    if os.name != "nt" or _kernel32 is None or not lock_file.is_file():
+        return False
+    ctypes.set_last_error(0)
+    handle = _kernel32.CreateFileW(
+        str(lock_file),
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        None,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
+    if handle and handle != INVALID_HANDLE_VALUE:
+        _kernel32.CloseHandle(handle)
+        return False
+    err = ctypes.get_last_error()
+    return err in (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION, ERROR_ACCESS_DENIED)
+
+
+def _firefox_bypass_list(bypass) -> str:
+    seen = set()
+    out = []
+    for raw in (bypass or []):
+        item = str(raw).strip()
+        if not item or item.lower() == "<local>":
+            continue
+        if item.startswith("*.") and len(item) > 2:
+            item = "." + item[2:]
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return ", ".join(out)
+
+
+def build_firefox_user_js(cfg) -> tuple[str, str]:
+    p = cfg["proxy"]
+    if not p.get("enabled", True):
+        text = (
+            "// Generated by ProxyDesk - proxy injection disabled\n"
+            'user_pref("network.proxy.type", 0);\n'
+        )
+        return text, "type=0 (直连，代理注入已关闭)"
+
+    host = str(p["host"]).strip()
+    port = int(p["port"])
+    no_proxy = _firefox_bypass_list(p.get("bypass", []))
+    lines = [
+        "// Generated by ProxyDesk - updated on each launch",
+        'user_pref("network.proxy.type", 1);',
+        f'user_pref("network.proxy.http", {json.dumps(host)});',
+        f'user_pref("network.proxy.http_port", {port});',
+        f'user_pref("network.proxy.ssl", {json.dumps(host)});',
+        f'user_pref("network.proxy.ssl_port", {port});',
+        'user_pref("network.proxy.share_proxy_settings", true);',
+        'user_pref("network.proxy.socks", "");',
+        'user_pref("network.proxy.socks_port", 0);',
+        f'user_pref("network.proxy.no_proxies_on", {json.dumps(no_proxy)});',
+        'user_pref("network.proxy.allow_hijacking_localhost", false);',
+    ]
+    summary = f"type=1 (manual) | http/ssl={host}:{port} | no_proxies_on={no_proxy or '(none)'}"
+    return "\n".join(lines) + "\n", summary
+
+
+def write_firefox_user_js(profile_dir: Path, content: str):
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    tmp = profile_dir / "user.js.tmp"
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(profile_dir / "user.js")
+
+
 def build_cmd(app, cfg):
     exe = expand(app["exe"])
     cmd = [exe] + split_args(app.get("args", ""))
@@ -368,6 +503,17 @@ def build_cmd(app, cfg):
             if rules:
                 cmd.append("--proxy-bypass-list=" + ";".join(rules))
                 injected.append("--proxy-bypass-list")
+    elif kind == "firefox":
+        user_args = cmd[1:]
+        lower_args = [a.lower() for a in user_args]
+        if not _has_firefox_profile_arg(user_args):
+            profile_dir = firefox_profile_dir(app)
+            if "-no-remote" not in lower_args and "--no-remote" not in lower_args:
+                cmd.append("-no-remote")
+                injected.append("-no-remote")
+            cmd.extend(["-profile", str(profile_dir)])
+            injected.append("-profile")
+            injected.append("user.js" if cfg["proxy"].get("enabled", True) else "user.js(直连)")
     return cmd, kind, injected
 
 
@@ -393,6 +539,25 @@ def launch_app(app, cfg, dry_run=False, force=False):
     result.update(kind=kind, cmd=cmd, env=delta, injected=injected,
                   already_running=len(running), proxy_latency_ms=latency)
 
+    managed_ff_profile = None
+    ff_user_js_text = None
+    if kind == "firefox":
+        user_args = split_args(app.get("args", ""))
+        if not _has_firefox_profile_arg(user_args):
+            managed_ff_profile = firefox_profile_dir(app)
+            profile_locked = is_firefox_profile_locked(managed_ff_profile)
+            ff_user_js_text, prefs_summary = build_firefox_user_js(cfg)
+            result.update(
+                firefox_profile=str(managed_ff_profile),
+                firefox_prefs=prefs_summary,
+                profile_running=profile_locked,
+            )
+        else:
+            profile_locked = False
+            result.update(profile_running=False)
+    else:
+        profile_locked = False
+
     # Preview must always work, even when the app is already running.
     if dry_run:
         result.update(ok=True, dry_run=True, message="预览（未真正启动）")
@@ -404,6 +569,20 @@ def launch_app(app, cfg, dry_run=False, force=False):
             error="%s 已在运行：Electron / Chromium 单实例锁会让新启动转发给旧进程，本次代理配置不会生效。请先完全退出。" % app["name"],
         )
         return result
+
+    if kind == "firefox" and managed_ff_profile is not None and profile_locked and not force:
+        result.update(
+            ok=False, code="already_running",
+            error="%s 的独立代理配置正在运行中：请先关闭通过 ProxyDesk 打开的该窗口，否则新的代理设置不会生效。" % app["name"],
+        )
+        return result
+
+    if kind == "firefox" and managed_ff_profile is not None and ff_user_js_text is not None:
+        try:
+            write_firefox_user_js(managed_ff_profile, ff_user_js_text)
+        except OSError as exc:
+            result.update(ok=False, error="写入 Firefox 代理配置失败: %s" % exc)
+            return result
 
     try:
         subprocess.Popen(
@@ -430,14 +609,21 @@ def make_state():
     for app in cfg["apps"]:
         exe = expand(app["exe"])
         kind, evidence = detect_kind(exe)
+        eff_kind = effective_kind(app)
+        profile_running = (
+            is_firefox_profile_locked(firefox_profile_dir(app))
+            if (eff_kind == "firefox" and not _has_firefox_profile_arg(split_args(app.get("args", ""))))
+            else False
+        )
         apps.append({
             **app,
             "resolved_exe": exe,
             "exists": Path(exe).is_file(),
             "detected_kind": kind,
-            "effective_kind": effective_kind(app),
+            "effective_kind": eff_kind,
             "evidence": evidence,
             "running": bool(running_lines(exe)),
+            "profile_running": profile_running,
         })
     return {
         "proxy": p,
@@ -1039,7 +1225,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/api/app/add", "/api/app/update"):
             kind_val = body.get("kind") or "auto"
-            if kind_val not in ("auto", "electron", "generic"):
+            if kind_val not in ("auto", "electron", "firefox", "generic"):
                 kind_val = "auto"
             item = {
                 "id": body.get("id") or ("app_%d" % int(time.time() * 1000)),

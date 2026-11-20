@@ -8,9 +8,10 @@ Python 纯标准库实现，零第三方依赖。
 
 ## 核心特性
 
-- **双层代理注入**
+- **三层代理注入**
   - **普通 / Node 应用**：注入 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`。
   - **Electron / Chromium 应用**：自动根据同目录特征文件识别，并额外注入 `--proxy-server` 与 `--proxy-bypass-list`（解决 Windows 下 Chromium 忽略 `*_PROXY` 环境变量的问题），在启动前对已运行实例做单实例锁提示。
+  - **Firefox / Gecko 应用**：自动根据同目录 `xul.dll`、`omni.ja` 等特征识别；使用 `-no-remote -profile` 在 `profiles/` 下隔离运行独立配置目录，每次启动自动写入 `user.js`（代理开关开启时注入 `network.proxy.type=1` 并将 `*.domain` 规则转为 Firefox 所需的 `.domain`，关闭时重置为 `type=0` 直连），并通过检测 `parent.lock` 避免误与日常 Firefox 冲突。
 - **独立轻量桌面壳**
   - 自动使用本机 Chrome / Edge `--app=` 模式搭配独立用户目录与 `--no-proxy-server` 打开界面，自身不受外部代理干扰。
   - 支持单实例复用（重复启动时尝试置前已有窗口）、延迟关闭（`F5` 刷新不断连）、空闲自动退出守护。
@@ -36,7 +37,7 @@ Python 纯标准库实现，零第三方依赖。
 
 1. **配置（可选）**
    - 首次启动会自动生成本地 `config.json`，也可以将 `config.example.json` 复制为 `config.json` 后按需修改代理端口、直连例外列表与应用列表。
-   - `config.json` 已加入 `.gitignore`，不会提交个人配置与内网规则。
+   - `config.json` 与独立浏览器配置目录 `profiles/` 已加入 `.gitignore`，不会提交个人配置与内网规则。
 2. **启动 ProxyDesk**
    - `launch_desk.vbs`：推荐方式，静默启动无控制台黑窗。
    - `launch_desk.bat`：备选无黑窗启动脚本（适合 `.vbs` 被拦截的环境）。

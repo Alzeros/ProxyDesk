@@ -62,13 +62,14 @@
   .avatar.has-icon .avatar-letter{opacity:0}
   .badge{font-size:11px;padding:3px 9px;border-radius:999px;background:#f1f4fa;color:var(--muted)}
   .badge.electron{background:var(--primary-soft);color:#3159c9}
+  .badge.firefox{background:#fff3e8;color:#c2520c}
   .card-name{margin:12px 0 2px;font-weight:600;font-size:15px}
   .card-path{color:var(--muted);font-size:11.5px;word-break:break-all;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .card-note{margin-top:4px;color:var(--muted);font-size:12px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .card-meta{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px;font-size:11.5px}
-  .ok{color:var(--green)} .bad{color:var(--red)} .warn{color:var(--amber)}
+  .ok{color:var(--green)} .bad{color:var(--red)} .warn{color:var(--amber)} .muted{color:var(--muted)}
   .card-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px}
   .card-actions .btn.primary{flex:1;min-width:70px}
   .empty{grid-column:1/-1;text-align:center;padding:46px 20px;color:var(--muted);
@@ -163,6 +164,7 @@
       <select id="fKind">
         <option value="auto">自动识别（推荐）</option>
         <option value="electron">Electron / Chromium（env + 启动参数）</option>
+        <option value="firefox">Firefox / Gecko（独立配置目录 + user.js）</option>
         <option value="generic">普通应用（仅环境变量）</option>
       </select>
     </label>
@@ -258,7 +260,12 @@ function render(){
   grid.innerHTML = STATE.apps.map(a=>{
     const kind=a.effective_kind;
     const tag = kind==='electron' ? '<span class="badge electron">Electron / Chromium</span>'
-                                   : '<span class="badge">通用</span>';
+              : kind==='firefox'  ? '<span class="badge firefox">Firefox / Gecko</span>'
+                                  : '<span class="badge">通用</span>';
+    const runBadge = kind==='firefox'
+      ? (a.profile_running ? '<span class="warn">● 代理实例运行中</span>'
+         : (a.running ? '<span class="muted">● 常规实例运行中</span>' : ''))
+      : (a.running ? '<span class="warn">● 运行中</span>' : '');
     const iconImg = a.exists
       ? `<img class="avatar-img" src="/api/app/icon?id=${encodeURIComponent(a.id)}&v=${encodeURIComponent(a.resolved_exe)}&token=${encodeURIComponent(TOKEN)}" alt="" onload="this.parentElement.classList.add('has-icon')" onerror="this.remove()">`
       : '';
@@ -272,8 +279,8 @@ function render(){
       ${a.note ? `<div class="card-note" title="${esc(a.note)}">${esc(a.note)}</div>` : ''}
       <div class="card-meta">
         <span class="${a.exists?'ok':'bad'}">${a.exists?'文件存在':'路径无效'}</span>
-        ${a.running?'<span class="warn">● 运行中</span>':''}
-        ${a.kind==='auto'&&a.detected_kind==='electron'?`<span class="ok">自动识别 ${a.evidence.length} 项特征</span>`:''}
+        ${runBadge}
+        ${a.kind==='auto'&&(a.detected_kind==='electron'||a.detected_kind==='firefox')?`<span class="ok">自动识别 ${a.evidence.length} 项特征</span>`:''}
       </div>
       <div class="card-actions">
         <button class="btn primary" data-act="launch">启动</button>
@@ -321,7 +328,9 @@ async function inspect(){
     box.className='inspect good';
     box.textContent = r.kind==='electron'
       ? `识别为 Electron / Chromium（${r.evidence.length} 项特征）→ 环境变量 + --proxy-server 双注入`
-      : `识别为普通应用 → 仅注入环境变量（如需走 Chromium 参数请手动改类型）`;
+      : r.kind==='firefox'
+      ? `识别为 Firefox / Gecko（${r.evidence.length} 项特征）→ 独立配置目录 + user.js 注入（不影响日常 Firefox）`
+      : `识别为普通应用 → 仅注入环境变量（如需走 Chromium / Firefox 参数请手动改类型）`;
   }catch(e){ box.className='inspect bad'; box.textContent='识别失败: '+e; }
 }
 async function saveEditor(){
@@ -338,16 +347,21 @@ async function saveEditor(){
 async function doLaunch(id,force=false){
   const r=await api('/api/launch',{id,force});
   if(r.code==='already_running'){
-    if(confirm(r.error+'\n\n仍要尝试启动吗？（环境变量不会进入旧进程）')) return doLaunch(id,true);
+    if(confirm(r.error+'\n\n仍要尝试启动吗？（新代理配置可能不会生效）')) return doLaunch(id,true);
     return;
   }
   if(r.ok){
     const envCount = r.env ? Object.keys(r.env).length : 0;
-    const injectDesc = !envCount
-      ? '（无，代理注入已关闭）'
-      : (r.injected && r.injected.length ? 'env + '+r.injected.join(', ') : 'env only');
+    const hasInj = r.injected && r.injected.length;
+    const injectDesc = r.kind==='firefox'
+      ? (envCount ? `env + ${hasInj?r.injected.join(', '):'自定义配置'}`
+                  : `${hasInj?r.injected.join(', '):'独立配置'} · 代理注入已关闭`)
+      : (!envCount
+          ? '（无，代理注入已关闭）'
+          : (hasInj ? 'env + '+r.injected.join(', ') : 'env only'));
     const lines = [{msg:`启动 ${r.app} [${r.kind}] · 注入 ${injectDesc}`, type:'ok'}];
     if(r.cmd) lines.push({msg:'  ' + r.cmd.join(' '), type:'dim'});
+    if(r.firefox_prefs) lines.push({msg:'  PREF: ' + r.firefox_prefs, type:'dim'});
     logBatch(lines);
     toast(r.message||'已启动');
     refresh();
@@ -366,19 +380,25 @@ async function preview(id){
     : '（无，代理注入已关闭）';
   const flagText = r.injected && r.injected.length
     ? r.injected.join(', ')
-    : (r.kind==='electron' ? '（无，代理注入已关闭或已手动指定）' : '（无，普通应用只吃 env）');
+    : (r.kind==='electron' ? '（无，代理注入已关闭或已手动指定）'
+       : r.kind==='firefox' ? '（已自定义 -profile，未自动覆盖）'
+       : '（无，普通应用只吃 env）');
   const lines = [
     {msg:`预览 ${r.app} [${r.kind}]（未启动，代理 ${r.proxy_latency_ms}ms）`, type:'info'},
     {msg:'  CMD : '+r.cmd.join(' '), type:'dim'},
     {msg:'  ENV : '+envText, type:'dim'},
     {msg:'  FLAG: '+flagText, type:'dim'}
   ];
-  if(r.already_running){
-    if(r.kind==='electron'){
-      lines.push({msg:'  注意：该应用当前已在运行，单实例锁会让环境变量不生效', type:'err'});
-    }else{
-      lines.push({msg:'  提示：该应用已有实例在运行（普通应用通常支持独立多开）', type:'dim'});
-    }
+  if(r.firefox_profile) lines.push({msg:'  PROF: '+r.firefox_profile, type:'dim'});
+  if(r.firefox_prefs) lines.push({msg:'  PREF: '+r.firefox_prefs, type:'dim'});
+  if(r.kind==='electron' && r.already_running){
+    lines.push({msg:'  注意：该应用当前已在运行，单实例锁会让环境变量不生效', type:'err'});
+  }else if(r.kind==='firefox' && r.profile_running){
+    lines.push({msg:'  注意：该应用的独立代理配置正在运行，需先关闭代理窗口再重新启动', type:'err'});
+  }else if(r.kind==='firefox' && !r.profile_running && r.already_running){
+    lines.push({msg:'  提示：检测到常规实例在运行，ProxyDesk 将使用独立配置目录并行启动，互不干扰', type:'dim'});
+  }else if(r.kind==='generic' && r.already_running){
+    lines.push({msg:'  提示：该应用已有实例在运行（普通应用通常支持独立多开）', type:'dim'});
   }
   logBatch(lines);
   toast('已把注入明细写到日志');
